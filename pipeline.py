@@ -14,8 +14,8 @@ if __name__ == '__main__':
     parser.add_argument("--lm", type=str, default="roberta-base")
 
     # Generative graph model parames
-    parser.add_argument("--proximity", type=float, default=0.8)
-    parser.add_argument("--diversity", type=float, default=0.2)
+    parser.add_argument("--proximity", type=float, default=0.7)
+    parser.add_argument("--diversity", type=float, default=0.3)
     parser.add_argument("--entropy_threshold", type=float, default=0.5)
 
     # GNN params
@@ -26,8 +26,8 @@ if __name__ == '__main__':
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--n_epochs", type=int, default=5)
-    parser.add_argument("--sizes", type=list, default=[25, 25])
-    parser.add_argument("--sampling_size", type=int, default=128)
+    parser.add_argument("--sizes", type=list, default=[100, 100])
+    parser.add_argument("--sampling_size", type=int, default=256)
     parser.add_argument("-encoding_size", type=int, default=64)
 
 
@@ -55,4 +55,4 @@ if __name__ == '__main__':
     else:
         print('using CPU')
         device='cpu'
-    train(model=model, data=graph, optimizer=optimizer, hp=hp, device=device)
+    train(model=model, data_obj=graph, optimizer=optimizer, hp=hp, device=device)

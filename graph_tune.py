@@ -9,13 +9,14 @@ import matplotlib.pyplot as plt
 from torch.utils import data
 from transformers import AutoModel, AutoTokenizer, AdamW, get_linear_schedule_with_warmup
 from torch_geometric.nn import SAGEConv, GCNConv, GATConv
+from torch_geometric.data import Data
 from sklearn.metrics import accuracy_score, f1_score
 from tqdm import tqdm
 from torch.utils.checkpoint import checkpoint
 import torch_geometric.loader as neighbor_loader
 import sklearn
 
-
+# TODO: properly implement evaluation function
 class GraphTune(nn.Module):
     """Transformer encoder fine-tuned via GNN classification head"""
 
@@ -72,17 +73,15 @@ class GraphTune(nn.Module):
             del inputs, outputs, embeddings
             torch.cuda.empty_cache()
         
-        # Concatenate on CPU and move to GPU once
+        
         return torch.cat(all_embeddings, dim=0).to(self.device)
 
     
-    def forward(self, samples, adjs):
-        # Step 1: Encode text into node features
+    def forward(self, samples, edge_index):
+        
         x = self._encode_text(samples).to(device=self.device)
         
-        # Step 2: Pass through GNN layers
-
-        for conv_layer, edge_index in zip(self.conv_layers, adjs):
+        for conv_layer in self.conv_layers:
             x = conv_layer(x, edge_index)
             x = F.relu(x)
         x = self.classifier(x)
@@ -90,92 +89,56 @@ class GraphTune(nn.Module):
         
     
 
-def evaluate(model, data, mask, hp, device='cuda'):
+def evaluate(model, data, samples, mask, hp, device='cuda'):
     model.eval()
     all_predictions = []
     all_true_labels = []
 
-    val_nodes = torch.where(mask)[0]  # Indices of validation nodes
-    val_node_set = set(val_nodes.tolist())
+    val_nodes = torch.where(mask)[0] 
 
-    relevant_edges = [
-        (src, dst) for src, dst in data.edge_index.t().tolist()
-        if src in val_node_set or dst in val_node_set
-    ]
-    if not relevant_edges:
-        raise ValueError("No edges found for the validation set.")
-
-    subgraph_edge_index = torch.tensor(relevant_edges, dtype=torch.long).t().contiguous().to(device)
-    subgraph_nodes = torch.unique(subgraph_edge_index).to(device)
-
-    val_loader = neighbor_loader.NeighborSampler(
-        edge_index=subgraph_edge_index,
-        node_idx=subgraph_nodes,
-        sizes=hp.sizes,  # Sampling sizes
+    val_loader = neighbor_loader.NeighborLoader(
+        data,
+        input_nodes=val_nodes,  
+        num_neighbors=[-1, -1], 
         batch_size=hp.sampling_size,
         shuffle=False
-    )
+       )
 
     with torch.no_grad():
-        for _, n_id, adjs in tqdm(val_loader):
-            val_mask_in_batch = torch.isin(n_id, val_nodes.to(n_id.device))
-            batch_samples = [data.samples[i] for i in n_id.tolist()]
-            batch_edge_index = [adj.edge_index.to(device) for adj in adjs]
-            out = model(batch_samples, batch_edge_index)
+        for batch in tqdm(val_loader):
+            batch_samples = [samples[i] for i in batch.n_id.tolist()]
+            out = model(batch_samples, batch.edge_index)
             predictions = out.argmax(dim=1)
-            true_labels = data.y[n_id].to(device)
-            all_predictions.append(predictions[val_mask_in_batch].cpu())
-            all_true_labels.append(true_labels[val_mask_in_batch].cpu())
+            true_labels = data.y[batch.n_id].to(device)
+            all_predictions.append(predictions.cpu())
+            all_true_labels.append(true_labels.cpu())
 
     all_predictions = torch.cat(all_predictions, dim=0)
     all_true_labels = torch.cat(all_true_labels, dim=0)
 
     accuracy = accuracy_score(all_true_labels, all_predictions)
-    f1 = f1_score(all_true_labels, all_predictions, average='weighted')
+    f1 = f1_score(all_true_labels, all_predictions)
 
     return accuracy, f1
 
-def ensure_val_test_edges(batch_edge_index, n_id, data, val_mask, test_mask):
-    """
-    Add missing edges for validation and test nodes to ensure proper message passing.
 
-    Args:
-        batch_edge_index (torch.Tensor): Current edge index for the batch.
-        n_id (torch.Tensor): Node indices in the batch.
-        data (Data): Full graph data object.
-        val_mask (torch.Tensor): Validation mask.
-        test_mask (torch.Tensor): Test mask.
+def transform(data):
+    samples = data.samples
+    left = data.left
+    right = data.right
+    clean_data = Data(
+    edge_index=data.edge_index,
+    y=data.y,
+    train_mask=data.train_mask,
+    val_mask=data.val_mask,
+    test_mask=data.test_mask,
+    logits=data.logits,
+    num_nodes=len(samples))
+    return left, right, samples, clean_data
 
-    Returns:
-        torch.Tensor: Updated edge index with added edges for val/test nodes.
-    """
-    device = batch_edge_index.device
-    batch_global_ids = n_id.tolist()
-    global_to_local = {nid: i for i, nid in enumerate(batch_global_ids)}
-    updated_edge_index = batch_edge_index.clone().to(device)
+def train(model, data_obj, optimizer, hp, device='cuda'):
 
-    val_test_global_ids = torch.cat([torch.where(val_mask)[0], torch.where(test_mask)[0]]).tolist()
-    val_test_in_batch = [nid for nid in val_test_global_ids if nid in global_to_local]
-
-    for global_id in val_test_in_batch:
-        local_id = global_to_local[global_id]
-        neighbors = data.edge_index[1, data.edge_index[0] == global_id].tolist()
-        for neighbor_global in neighbors:
-            if neighbor_global in global_to_local:
-                neighbor_local = global_to_local[neighbor_global]
-                if not ((updated_edge_index[0] == local_id) & (updated_edge_index[1] == neighbor_local)).any():
-                    updated_edge_index = torch.cat(
-                        [updated_edge_index, torch.tensor([[local_id], [neighbor_local]]).to(device)], dim=1
-                    )
-                if not ((updated_edge_index[0] == neighbor_local) & (updated_edge_index[1] == local_id)).any():
-                    updated_edge_index = torch.cat(
-                        [updated_edge_index, torch.tensor([[neighbor_local], [local_id]]).to(device)], dim=1
-                    )
-
-    return updated_edge_index
-
-def train(model, data, optimizer, hp, device='cuda'):
-    
+    _, _, samples, data = transform(data_obj)
     criterion = nn.CrossEntropyLoss()
     print(model.signature())
 
@@ -187,26 +150,14 @@ def train(model, data, optimizer, hp, device='cuda'):
     data.val_mask = data.val_mask.to(device)
     data.test_mask = data.test_mask.to(device)
 
-    # Identify validation and test nodes
-    val_nodes = torch.where(data.val_mask)[0].to(device)
-    test_nodes = torch.where(data.test_mask)[0].to(device)
-    val_and_test_nodes = torch.cat([val_nodes, test_nodes]).unique()
-
-    # Ensure all edges connected to val/test nodes are included
-    edge_mask = torch.zeros(data.edge_index.size(1), dtype=torch.bool).to(device)
-    for node in val_and_test_nodes:
-        edge_mask |= (data.edge_index[0] == node) | (data.edge_index[1] == node)
-
-    # Always include edges connected to validation/test nodes in NeighborSampler
-    fixed_edge_index = data.edge_index[:, edge_mask]
-
-    loader = neighbor_loader.NeighborSampler(
-        data.edge_index, 
-        node_idx=torch.arange(len(data.samples)),
-        sizes=hp.sizes,
+    
+    loader = neighbor_loader.NeighborLoader(
+        data,
+        input_nodes=torch.arange(data.num_nodes),  
+        num_neighbors=hp.sizes, 
         batch_size=hp.sampling_size,
         shuffle=True
-    )
+       )
 
     for epoch in range(1, hp.n_epochs + 1):
         model.train()
@@ -214,16 +165,13 @@ def train(model, data, optimizer, hp, device='cuda'):
         num_train_batches = 0
         
         print('performing train step:')
-        for _, n_id, adjs in tqdm(loader):
-            batch_edge_index = torch.cat([adj.edge_index for adj in adjs], dim=1).to(device)
-            batch_edge_index = ensure_val_test_edges(batch_edge_index, n_id, data, data.val_mask, data.test_mask)
-            batch_edge_index = torch.unique(batch_edge_index, dim=1)
-            batch_train_mask = data.train_mask[n_id]
-            batch_samples = [data.samples[i] for i in n_id]
-            print(batch_edge_index.shape)
-            
-            out = model(batch_samples, batch_edge_index)  # Feed the corresponding sample embeddings
-            loss = criterion(out[batch_train_mask], data.y[n_id][batch_train_mask])  # Only use training nodes
+        for batch in tqdm(loader):
+            optimizer.zero_grad()
+            batch_samples = [samples[i] for i in batch.n_id]
+            batch_train_mask = data.train_mask[batch.n_id]
+
+            out = model(batch_samples, batch.edge_index)  # Feed the corresponding sample embeddings
+            loss = criterion(out[batch_train_mask], batch.y[batch_train_mask])  # Only use training nodes
             loss.backward()
             optimizer.step()
             
@@ -233,7 +181,9 @@ def train(model, data, optimizer, hp, device='cuda'):
         avg_loss = total_loss / num_train_batches
 
         print('evaluating model:')
-        acc, f1 = evaluate(model, data, data.val_mask, hp, device) 
-        print(f"Epoch {epoch}/{hp.n_epochs}, Loss: {avg_loss:.4f}, f1: {f1:.4f}, accuracy: {acc:.4f}")
+        acc, f1 = evaluate(model, data, samples, data.val_mask, hp, device) 
+        train_acc, train_f1 = evaluate(model, data, samples, data.train_mask, hp, device)
+
+        print(f"Epoch {epoch}/{hp.n_epochs}, Loss: {avg_loss:.4f}, f1: {f1:.4f}, accuracy: {acc:.4f}, train_f1: {train_f1:.4f}, train_acc:{train_acc:.4f}")
             
 
