@@ -94,12 +94,10 @@ def evaluate(model, data, samples, mask, hp, device='cuda'):
     all_predictions = []
     all_true_labels = []
 
-    val_nodes = torch.where(mask)[0] 
-
     val_loader = neighbor_loader.NeighborLoader(
         data,
-        input_nodes=val_nodes,  
-        num_neighbors=[-1, -1], 
+        input_nodes=torch.arange(data.num_nodes),  
+        num_neighbors=hp.sizes, 
         batch_size=hp.sampling_size,
         shuffle=False
        )
@@ -113,8 +111,8 @@ def evaluate(model, data, samples, mask, hp, device='cuda'):
             all_predictions.append(predictions.cpu())
             all_true_labels.append(true_labels.cpu())
 
-    all_predictions = torch.cat(all_predictions, dim=0)
-    all_true_labels = torch.cat(all_true_labels, dim=0)
+    all_predictions = torch.cat(all_predictions, dim=0)[mask.cpu()]
+    all_true_labels = torch.cat(all_true_labels, dim=0)[mask.cpu()]
 
     accuracy = accuracy_score(all_true_labels, all_predictions)
     f1 = f1_score(all_true_labels, all_predictions)
