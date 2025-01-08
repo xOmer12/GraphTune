@@ -32,6 +32,7 @@ class GraphTune(nn.Module):
         self.seed = seed
         self.conv_layers = nn.ModuleList()
         self.batch_size = encoding_batch_size
+        self.dropout = nn.Dropout(p=0.5)
 
         for in_channels, out_channels in zip(self.hc_config[:-1], self.hc_config[1:]):
             if conv_type == 'GCN':
@@ -84,6 +85,8 @@ class GraphTune(nn.Module):
         for conv_layer in self.conv_layers:
             x = conv_layer(x, edge_index)
             x = F.relu(x)
+            x = self.dropout(x)
+            x = F.layer_norm(x, x.shape[1:])
         x = self.classifier(x)
         return x
         
@@ -104,15 +107,16 @@ def evaluate(model, data, samples, mask, hp, device='cuda'):
 
     with torch.no_grad():
         for batch in tqdm(val_loader):
-            batch_samples = [samples[i] for i in batch.n_id.tolist()]
+            batch_samples = [samples[i] for i in batch.n_id]
+            batch_eval_mask = mask[batch.n_id]
             out = model(batch_samples, batch.edge_index)
             predictions = out.argmax(dim=1)
-            true_labels = data.y[batch.n_id].to(device)
-            all_predictions.append(predictions.cpu())
-            all_true_labels.append(true_labels.cpu())
+            true_labels = batch.y.to(device)
+            all_predictions.append(predictions[batch_eval_mask].cpu())
+            all_true_labels.append(true_labels[batch_eval_mask].cpu())
 
-    all_predictions = torch.cat(all_predictions, dim=0)[mask.cpu()]
-    all_true_labels = torch.cat(all_true_labels, dim=0)[mask.cpu()]
+    all_predictions = torch.cat(all_predictions, dim=0)
+    all_true_labels = torch.cat(all_true_labels, dim=0)
 
     accuracy = accuracy_score(all_true_labels, all_predictions)
     f1 = f1_score(all_true_labels, all_predictions)
@@ -133,6 +137,15 @@ def transform(data):
     logits=data.logits,
     num_nodes=len(samples))
     return left, right, samples, clean_data
+
+
+def freeze_transformer(model):
+    for param in model.transformer.parameters():
+        param.requires_grad = False
+
+def unfreeze_transformer(model):
+    for param in model.transformer.parameters():
+        param.requires_grad = True
 
 def train(model, data_obj, optimizer, hp, device='cuda'):
 
@@ -158,10 +171,16 @@ def train(model, data_obj, optimizer, hp, device='cuda'):
        )
 
     for epoch in range(1, hp.n_epochs + 1):
+        
         model.train()
         total_loss = 0
         num_train_batches = 0
-        
+
+        if epoch < hp.n_epochs / 2:
+            freeze_transformer(model)
+        else:
+            unfreeze_transformer(model)
+            
         print('performing train step:')
         for batch in tqdm(loader):
             optimizer.zero_grad()

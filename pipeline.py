@@ -14,8 +14,8 @@ if __name__ == '__main__':
     parser.add_argument("--lm", type=str, default="roberta-base")
 
     # Generative graph model parames
-    parser.add_argument("--proximity", type=float, default=0.7)
-    parser.add_argument("--diversity", type=float, default=0.3)
+    parser.add_argument("--proximity", type=float, default=0.5)
+    parser.add_argument("--diversity", type=float, default=0.1)
     parser.add_argument("--entropy_threshold", type=float, default=0.5)
 
     # GNN params
@@ -23,12 +23,12 @@ if __name__ == '__main__':
     parser.add_argument("--input_layer", type=int, default=768)
     parser.add_argument("--hidden_layers", type=list, default=[64, 16])
     parser.add_argument("--seeds", type=str, default="[42, 24, 7, 30, 15]")
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
-    parser.add_argument("--n_epochs", type=int, default=5)
+    parser.add_argument("--n_epochs", type=int, default=10)
     parser.add_argument("--sizes", type=list, default=[100, 100])
-    parser.add_argument("--sampling_size", type=int, default=256)
-    parser.add_argument("-encoding_size", type=int, default=64)
+    parser.add_argument("--sampling_size", type=int, default=128)
+    parser.add_argument("-encoding_size", type=int, default=128)
 
 
 
@@ -48,7 +48,7 @@ if __name__ == '__main__':
                       conv_type=hp.conv_type, 
                       encoder_channel=hp.input_layer, 
                       hidden_channels=hp.hidden_layers)
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=hp.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=hp.learning_rate, weight_decay=hp.weight_decay)
     if torch.cuda.is_available():
         print('using GPU')
         device='cuda'
