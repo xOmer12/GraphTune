@@ -34,7 +34,7 @@ class StochasticBlockModel:
         self.val_mask[train_size:train_size + val_size] = True
         self.test_mask[train_size + val_size:] = True
 
-    
+
     def read_data(self, dset_path, get_logits=False):
 
         with open(dset_path) as f:
@@ -93,17 +93,107 @@ class StochasticBlockModel:
         else:
             return data
 
+class NoisySBM:
+
+    def __init__(self, p, q, noisy_config, real_config):
+
+        self.p = p
+        self.q = q
+        self.noisy_config = noisy_config
+        self.real_config = real_config
+        self.read_data(noisy_config['trainset'], real_config['trainset'])
+
+
+
+    def read_data(self, noisy_path, real_path):
+
+        with open(noisy_path) as f:
+            noisy_lines = f.read().splitlines()
+
+        with open(real_path) as f:
+            real_lines = f.read().splitlines()
+
+        split_noisy_lines = [line.split('\t') for line in noisy_lines]
+        split_real_lines = [line.split('\t') for line in real_lines] 
+        split_noisy_lines = np.array(split_noisy_lines)
+        split_real_lines = np.array(split_real_lines)
+
+        self.left_samples = split_noisy_lines[:, 0].tolist()
+        self.right_samples = split_noisy_lines[:, 1].tolist()
+
+        noisy_labels = split_noisy_lines[:, 2].tolist()
+        self.noisy_labels = [int(l) for l in noisy_labels]
+
+        real_labels = split_real_lines[:, 2].tolist()
+        self.real_labels = [int(l) for l in real_labels]
+
+        logits = split_noisy_lines[:, 3].tolist()
+        self.logits = [float(l) for l in logits]
+        self.train_entropies = np.array([-prob*np.log(prob)-(1-prob)*np.log(1-prob) for prob in self.logits])
+
+                
+    def create_mismatch_mask(self):
+        mask = []
+        for noisy, real in zip(self.noisy_labels, self.real_labels):
+            if noisy != real:
+                mask.append(1)
+            else:
+                mask.append(0)
+        self.mismatch_mask = np.array(mask)
+
+    def sample_edge_index(self):
+        # Convert noisy_labels to tensor if it isn't already
+        if not isinstance(self.noisy_labels, torch.Tensor):
+            self.noisy_labels = torch.tensor(self.noisy_labels, dtype=torch.long)
+        
+        nodes_to_sample = np.arange(len(self.noisy_labels))
+        probs = torch.tensor([[self.p, self.q], [self.q, self.p]], dtype=torch.float)
+        
+        # Convert to tensor and ensure long type
+        row, col = torch.combinations(torch.tensor(nodes_to_sample, dtype=torch.long), r=2, with_replacement=True).t()
+        
+        # Get labels and ensure they're long type for indexing
+        row_labels = self.noisy_labels[row].long()
+        col_labels = self.noisy_labels[col].long()
+        
+        # Use the labels for indexing
+        mask = torch.bernoulli(probs[row_labels, col_labels]).to(torch.bool)
+        edge_index = torch.stack([row[mask], col[mask]], dim=0)
+        
+        if len(edge_index.shape) != 2:
+            edge_index = edge_index.view(2, -1)
+        
+        edge_index = torch_geometric.utils.to_undirected(edge_index)
+        self.edge_index = edge_index
+    
+    def generate_graph(self):
+        
+        self.create_mismatch_mask()
+        self.sample_edge_index()
+        data = Data(x=None, edge_index=self.edge_index, y=torch.tensor(self.noisy_labels))
+        data.real_labels = torch.tensor(self.real_labels)
+        data.logits = self.logits
+        data.left = self.left_samples
+        data.right = self.right_samples
+        data.samples = [l+'[sep]'+r for l, r in zip(data.left, data.right)]
+        data.mismatch_mask = self.mismatch_mask
+
+        return data
+        
+
 
 if __name__ == '__main__':
 
-    task = "Structured/Amazon-GoogleBert"
+    task = "Dirty/iTunes-AmazonBert"
+    og_task = task.replace("Bert", "")
     with open('task_configs.json', 'r') as file:
         configs = json.load(file)
     
     configs = {config['name']: config for config in configs}
-    task_config = configs[task]
+    noisy_config = configs[task]
+    real_config = configs[og_task]
 
-    sbm = StochasticBlockModel(p=0.75, q=0.25, config=task_config)
-    graph = sbm.generate_graph(entropy_threshold=0.5)
-
-    print(graph.left)
+    sbm = NoisySBM(p=0.75, q=0.25, noisy_config=noisy_config, real_config=real_config)
+    graph = sbm.generate_graph()
+    print(graph.mismatch_mask)
+    
