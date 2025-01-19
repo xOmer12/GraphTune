@@ -67,6 +67,7 @@ class GraphTune(nn.Module):
         ]
         
         return AdamW(param_groups)
+
     def _forward_transformer(self, input_ids, attention_mask):
         return self.transformer(input_ids=input_ids, attention_mask=attention_mask)
     
@@ -91,7 +92,6 @@ class GraphTune(nn.Module):
             all_embeddings.append(embeddings) 
             del inputs, outputs, embeddings
             torch.cuda.empty_cache()
-        
         
         return torch.cat(all_embeddings, dim=0).to(self.device)
 
@@ -225,7 +225,7 @@ class GraphTuneLoRA(nn.Module):
     def load_lora_weights(self, path):
         self.transformer.load_adapter(path)    
 
-def evaluate(model, data, samples, mask, hp, device='cuda'):
+def evaluate(model, data, samples, mask, hp, device='cuda:1'):
     model.eval()
     all_predictions = []
     all_true_labels = []
@@ -262,7 +262,6 @@ def evaluate(model, data, samples, mask, hp, device='cuda'):
 
     return accuracy, f1
 
-
 def transform(data):
     samples = data.samples
     left = data.left
@@ -291,8 +290,7 @@ def transform_flip(data):
     )
     return left, right, samples, clean_data
 
-
-def train(model, data_obj, hp, device='cuda'):
+def train(model, data_obj, hp, device='cuda:1'):
 
     optimizer = model.get_optimizer(
         transformer_lr=hp.transformer_lr,
@@ -367,7 +365,7 @@ def train(model, data_obj, hp, device='cuda'):
         print(f"Epoch {epoch}/{hp.n_epochs}, Loss: {avg_loss:.4f}, f1: {f1:.4f}, accuracy: {acc:.4f}, train_f1: {train_f1:.4f}, train_acc:{train_acc:.4f}")
     return train_acc, train_f1, acc, f1
 
-def train_flip(model, data_obj, hp, device='cuda'): 
+def train_flip(model, data_obj, hp, device='cuda:1'): 
 
 
     # for name, param in model.transformer.named_parameters():
@@ -489,8 +487,7 @@ def train_flip(model, data_obj, hp, device='cuda'):
             print(f"Epoch {epoch}/{hp.n_epochs}, Loss: {avg_loss:.4f}, mm_f1: {mm_f1:.4f}, mm_accuracy: {mm_accuracy:.4f}, f1: {f1:.4f}, acc:{accuracy:.4f}, n_f1:{noisy_f1:.4f}, n_acc:{noisy_accuracy:.4f}")
     return accuracy, f1, mm_accuracy, mm_f1
 
-
-def train_flip_no_load(model, data_obj, hp, device='cuda'): 
+def train_flip_no_load(model, data_obj, hp, device='cuda:1'): 
 
     for name, param in model.transformer.named_parameters():
         if 'lora' not in name:

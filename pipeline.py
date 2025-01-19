@@ -14,8 +14,8 @@ if __name__ == '__main__':
     parser.add_argument("--lm", type=str, default="roberta-base")
 
     # Generative graph model params
-    parser.add_argument("--proximity", type=float, default=0.7)
-    parser.add_argument("--diversity", type=float, default=0.2)
+    parser.add_argument("--proximity", type=float, default=0.1)
+    parser.add_argument("--diversity", type=float, default=0.05)
     parser.add_argument("--entropy_threshold", type=float, default=1)
 
     # GNN params
@@ -37,6 +37,12 @@ if __name__ == '__main__':
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.1)
 
+    if torch.cuda.is_available():
+        print('using GPU')
+        device='cuda:1'
+    else:
+        print('using CPU')
+        device='cpu'
 
     hp = parser.parse_args()
     
@@ -63,13 +69,14 @@ if __name__ == '__main__':
                       conv_type=hp.conv_type,
                       encoder_channel=hp.input_layer,
                       hidden_channels=hp.hidden_layers,
-                      encoding_batch_size=hp.encoding_size)
+                      encoding_batch_size=hp.encoding_size,
+                      device=device)
     
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=hp.learning_rate, weight_decay=hp.weight_decay)
     if torch.cuda.is_available():
         print('using GPU')
-        device='cuda'
+        device='cuda:1'
     else:
         print('using CPU')
         device='cpu'
