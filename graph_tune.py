@@ -75,30 +75,29 @@ class GraphTune(nn.Module):
     def _encode_text(self, samples):
         all_embeddings = []
         
-        with torch.no_grad():  # Add this since embeddings don't need gradients during inference
-            for i in range(0, len(samples), self.batch_size):
-                batch_samples = samples[i:i+self.batch_size]
-                inputs = self.tokenizer(batch_samples, return_tensors="pt", padding=True, truncation=True)
-                inputs = {key: val.to(self.device) for key, val in inputs.items()}
-                
-                # Use inference mode for transformer if not training
-                if not self.training:
-                    with torch.inference_mode():
-                        outputs = self._forward_transformer(inputs['input_ids'], inputs['attention_mask'])
-                else:
-                    outputs = checkpoint(
-                        self._forward_transformer,
-                        inputs['input_ids'],
-                        inputs['attention_mask'],
-                        use_reentrant=False
-                    )
-                
-                embeddings = outputs.last_hidden_state[:, 0, :]
-                all_embeddings.append(embeddings.detach())  # Detach to break computation graph
-                
-                # Clear memory more aggressively
-                del inputs, outputs
-                torch.cuda.empty_cache()
+        for i in range(0, len(samples), self.batch_size):
+            batch_samples = samples[i:i+self.batch_size]
+            inputs = self.tokenizer(batch_samples, return_tensors="pt", padding=True, truncation=True)
+            inputs = {key: val.to(self.device) for key, val in inputs.items()}
+            
+            # Use inference mode for transformer if not training
+            if not self.training:
+                with torch.inference_mode():
+                    outputs = self._forward_transformer(inputs['input_ids'], inputs['attention_mask'])
+            else:
+                outputs = checkpoint(
+                    self._forward_transformer,
+                    inputs['input_ids'],
+                    inputs['attention_mask'],
+                    use_reentrant=False
+                )
+            
+            embeddings = outputs.last_hidden_state[:, 0, :]
+            all_embeddings.append(embeddings.detach())  # Detach to break computation graph
+            
+            # Clear memory more aggressively
+            del inputs, outputs
+            torch.cuda.empty_cache()
         
         return torch.cat(all_embeddings, dim=0)
 
