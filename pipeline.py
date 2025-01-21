@@ -19,12 +19,12 @@ if __name__ == '__main__':
     parser.add_argument("--entropy_threshold", type=float, default=1)
 
     # GNN params
-    parser.add_argument("--conv_type", type=str, default="GraphSAGE")
+    parser.add_argument("--conv_type", type=str, default="GCN")
     parser.add_argument("--input_layer", type=int, default=768)
     parser.add_argument("--hidden_layers", type=list, default=[32, 16])
     parser.add_argument("--seeds", type=str, default="[42, 24, 7, 30, 15]")
     parser.add_argument("--learning_rate", type=float, default=1e-5)
-    parser.add_argument("--transformer_lr", type=float, default=1e-4)
+    parser.add_argument("--transformer_lr", type=float, default=1e-3)
     parser.add_argument("--gnn_lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--n_epochs", type=int, default=5)
@@ -55,8 +55,16 @@ if __name__ == '__main__':
     noisy_config = configs[task]
     real_config = configs[og_task]
 
-    sbm = SBMGraph(p=hp.proximity, q=hp.diversity, config_true=noisy_config, config_noisy=real_config)
+    sbm = AdaptiveBMGraph(p=hp.proximity, q=hp.diversity, 
+    config_true=noisy_config, config_noisy=real_config, c0=50, c1=50,beta=25)
+    sbm.calc_community_probs()
+    print('Community probabilities:')
+    print(sbm.probs)
+    print('Generating graph...')
     graph = sbm.generate_graph()
+    print('Analyzing graph...')
+    sbm.analyze_graph()
+    print('-'*50)
     model = GraphTune(lm = hp.lm,
                       conv_type=hp.conv_type,
                       encoder_channel=hp.input_layer,

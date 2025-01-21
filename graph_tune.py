@@ -109,8 +109,6 @@ class GraphTune(nn.Module):
         for conv_layer in self.conv_layers:
             x = conv_layer(x, edge_index)
             x = F.relu(x)
-            x = self.dropout(x)
-            x = F.layer_norm(x, x.shape[1:])
         x = self.classifier(x)
         return x
         
@@ -160,8 +158,10 @@ def train(model, data_obj, hp, device='cuda:1'):
         loss = criterion(out[train_mask], y[train_mask])
         loss.backward()
         optimizer.step()
-        accuracy, f1 = evaluate(model, edge_index, samples, val_mask, labels_clean, hp, device)
-        print(f'Epoch {epoch} Loss: {loss.item()} Accuracy: {accuracy} F1: {f1}')
+        noisy_acc, noisy_f1 = evaluate(model, edge_index, samples, train_mask, y, hp, device)
+        train_acc, train_f1 = evaluate(model, edge_index, samples, train_mask, labels_clean, hp, device)
+        acc, f1 = evaluate(model, edge_index, samples, val_mask, labels_clean, hp, device)
+        print(f'Epoch {epoch} Loss: {loss.item():.4f} Accuracy: {acc:.4f} F1: {f1:.4f} Train Accuracy: {train_acc:.4f} Train F1: {train_f1:.4f} Noisy Accuracy: {noisy_acc:.4f} Noisy F1: {noisy_f1:.4f}')
 
 def transform(data):
     '''

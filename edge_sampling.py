@@ -74,6 +74,19 @@ class SBMGraph:
         self.edge_index = edge_index
         return edge_index
 
+    def analyze_graph(self):
+        '''
+        Analyze the graph generated from the SBM model
+        '''
+        G = nx.Graph()
+        G.add_edges_from(self.edge_index.t().tolist())
+        print(f'Number of nodes: {G.number_of_nodes()}')
+        print(f'Number of edges: {G.number_of_edges()}')
+        print(f'Average degree: {np.mean(list(dict(G.degree()).values()))}')
+        print(f'Density: {nx.density(G)}')
+        print(f'Number of connected components: {nx.number_connected_components(G)}')
+        print(f'Average clustering coefficient: {nx.average_clustering(G)}')
+
     def generate_graph(self) -> Data:
         '''
         Generate a graph from the left and right samples, using labels as assginments to communities in SBM model
@@ -90,5 +103,44 @@ class SBMGraph:
         data.labels_clean = torch.tensor(self.labels)
 
         return data
-        
+
+class AdaptiveBMGraph(SBMGraph):
+    def __init__(self, p: float, q: float, config_true: dict, config_noisy: dict, c0: int, c1, beta: float):
+        super().__init__(p, q, config_true, config_noisy)
+        self.c0 = c0
+        self.c1 = c1
+        self.beta = beta
+    
+
+    def calc_community_probs(self):
+        '''
+        Calculate the community probabilities for the Adaptive SBM model
+        '''
+        n_zeros = np.where(self.labels == 0)[0].shape[0]
+        n_ones = np.where(self.labels == 1)[0].shape[0]
+        p_intra_0 = self.c0 / n_zeros
+        p_intra_1 = self.c1 / n_ones
+        p_inter = self.beta / (n_zeros + n_ones)
+        self.probs = torch.tensor([[p_intra_0, p_inter], [p_inter, p_intra_1]], dtype=torch.float)
+
+    def sample_edge_index(self):
+        '''
+        Sample the edge index from the dataset according to Adaptive SBM model
+        '''
+        train_nodes = np.where(self.train_mask == True)[0]
+        val_nodes = np.where(self.val_mask == True)[0]
+        test_nodes = np.where(self.test_mask == True)[0]
+        nodes_to_sample = np.concatenate([train_nodes, val_nodes, test_nodes])
+        probs = self.probs
+        row, col = torch.combinations(torch.tensor(nodes_to_sample), r=2, with_replacement=True).t()
+        mask = torch.bernoulli(probs[self.labels[row], self.labels[col]]).to(torch.bool)
+        edge_index = torch.stack([row[mask], col[mask]], dim=0)
+        if len(edge_index.shape) != 2: 
+            edge_index = edge_index.view(2, -1)
+        edge_index = torch_geometric.utils.to_undirected(edge_index)
+        self.edge_index = edge_index
+        return edge_index
+
+
+
         
