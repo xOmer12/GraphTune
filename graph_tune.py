@@ -17,7 +17,9 @@ from torch.utils.checkpoint import checkpoint
 import torch_geometric.loader as neighbor_loader
 import sklearn
 
-# TODO: properly implement evaluation function
+# TODO: Add negative sampling in back-prop
+# TODO: Add sampling based on prior on weak label
+# TODO: Find a way to prevent model to converge to a trivial solution
 class GraphTune(nn.Module):
     """Transformer encoder fine-tuned via GNN classification head"""
 
@@ -162,10 +164,17 @@ def train(model, data_obj, hp, device='cuda:1'):
     labels_clean=data_obj.labels_clean.to(device)
 
     for epoch in range(1, hp.n_epochs+1):
+        # if epoch <= hp.freeze_epoch_ratio * hp.n_epochs:
+        #     model._freeze_transformer(freeze=True)
+        # else:
+        #     model._freeze_transformer(freeze=False)
+        model._freeze_transformer(freeze=True)
         model.train()
         model.training_mode = True # Manual flag for transformer inference mode
         optimizer.zero_grad()
         out = model(data_obj.samples, edge_index)
+        # Sample nodes with label 0 to be used as negative samples out of the train mask
+        negative_sampling_mask = 
         loss = criterion(out[train_mask], y[train_mask])
         loss.backward()
         optimizer.step()

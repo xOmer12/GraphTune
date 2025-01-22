@@ -37,6 +37,9 @@ def read_data(config: dict):
 
     # Get the sizes of each set and create masks
     train_size, val_size, test_size = len(train_labels), len(val_labels), len(test_labels)
+    print(f'train size: {train_size}')
+    print(f'val size: {val_size}')
+    print(f'test size: {test_size}')
     dset_size = train_size + val_size + test_size
     train_mask = torch.zeros(dset_size, dtype=torch.bool)
     val_mask = torch.zeros(dset_size, dtype=torch.bool)
