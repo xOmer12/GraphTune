@@ -17,9 +17,13 @@ from torch.utils.checkpoint import checkpoint
 import torch_geometric.loader as neighbor_loader
 import sklearn
 
-# TODO: Add negative sampling in back-prop
 # TODO: Add sampling based on prior on weak label
 # TODO: Find a way to prevent model to converge to a trivial solution
+
+
+# Loss seems to converge yet model learns to classify everything as 0 already after the first epoch.
+
+
 class GraphTune(nn.Module):
     """Transformer encoder fine-tuned via GNN classification head"""
 
@@ -106,7 +110,7 @@ class GraphTune(nn.Module):
                 )
             
             embeddings = outputs.last_hidden_state[:, 0, :]
-            all_embeddings.append(embeddings.detach())  # Detach to break computation graph
+            all_embeddings.append(embeddings) 
             
             # Clear memory more aggressively
             del inputs, outputs
@@ -161,21 +165,33 @@ def train(model, data_obj, hp, device='cuda:1'):
     val_mask = data_obj.val_mask.to(device)
     test_mask = data_obj.test_mask.to(device)
     y = data_obj.y.to(device)
+    positive_label_mask = torch.zeros_like(y)
+    positive_label_mask[y == 1] = True # Positive label mask
+    negative_label_mask = torch.zeros_like(y)
+    negative_label_mask[y == 0] = True # Negative label mask
     labels_clean=data_obj.labels_clean.to(device)
+
+
+    print(f'amount of positive samples in trainset: [{(positive_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
+    print(f'amount of negative samples in trainset: [{(negative_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
 
     for epoch in range(1, hp.n_epochs+1):
         # if epoch <= hp.freeze_epoch_ratio * hp.n_epochs:
         #     model._freeze_transformer(freeze=True)
         # else:
         #     model._freeze_transformer(freeze=False)
-        model._freeze_transformer(freeze=True)
+        model._freeze_transformer(freeze=True) # Test GNN overfitting, temporary
         model.train()
         model.training_mode = True # Manual flag for transformer inference mode
         optimizer.zero_grad()
         out = model(data_obj.samples, edge_index)
+
         # Sample nodes with label 0 to be used as negative samples out of the train mask
-        negative_sampling_mask = 
-        loss = criterion(out[train_mask], y[train_mask])
+        negative_sample_mask = negative_sampling(train_mask, negative_label_mask, sample_ratio=hp.sample_ratio)
+        positive_sample_mask = (positive_label_mask & train_mask)
+        train_iter_mask = (negative_sample_mask | positive_sample_mask)
+        print(f'Epoch {epoch} Training on [{train_iter_mask.sum().item()}/{train_mask.sum().item()}] samples')
+        loss = criterion(out[train_iter_mask], y[train_iter_mask])
         loss.backward()
         optimizer.step()
         noisy_acc, noisy_f1 = evaluate(model, edge_index, samples, train_mask, y, hp, device)
@@ -199,3 +215,14 @@ def transform(data):
     logits=data.logits,
     num_nodes=len(samples))
     return left, right, samples, clean_data
+
+def negative_sampling(data_mask, negative_label_mask, sample_ratio=0.5):
+    '''
+    Sample negative nodes from the data mask and return mask for the negative samples
+    '''
+    n_samples = int(sample_ratio * data_mask.sum().item())
+    negative_samples = torch.where(negative_label_mask & data_mask)[0]
+    negative_samples = negative_samples[torch.randperm(negative_samples.size(0))[:n_samples]]
+    negative_mask = torch.zeros_like(data_mask)
+    negative_mask[negative_samples] = True
+    return negative_mask

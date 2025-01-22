@@ -28,11 +28,12 @@ if __name__ == '__main__':
     parser.add_argument("--transformer_lr", type=float, default=1e-3)
     parser.add_argument("--gnn_lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
-    parser.add_argument("--n_epochs", type=int, default=5)
+    parser.add_argument("--n_epochs", type=int, default=1)
     parser.add_argument("--freeze_epoch_ratio", type=float, default=0.5)
     parser.add_argument("--sizes", type=list, default=[50, 10])
     parser.add_argument("--sampling_size", type=int, default=512)
     parser.add_argument("-encoding_size", type=int, default=16)
+    parser.add_argument("--sample_ratio", type=float, default=0.1)
 
     # LoRA params
     parser.add_argument("--lora_rank", type=int, default=16)
