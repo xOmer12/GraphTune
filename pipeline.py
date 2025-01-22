@@ -11,6 +11,7 @@ import os
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", type=str, default="Structured/Amazon-GoogleBert")
+    parser.add_argument("--matcher_type", type=str, default="Bert")
     parser.add_argument("--lm", type=str, default="roberta-base")
 
     # Generative graph model params
@@ -19,7 +20,7 @@ if __name__ == '__main__':
     parser.add_argument("--entropy_threshold", type=float, default=1)
 
     # GNN params
-    parser.add_argument("--conv_type", type=str, default="GCN")
+    parser.add_argument("--conv_type", type=str, default="GAT")
     parser.add_argument("--input_layer", type=int, default=768)
     parser.add_argument("--hidden_layers", type=list, default=[32, 16])
     parser.add_argument("--seeds", type=str, default="[42, 24, 7, 30, 15]")
@@ -47,7 +48,7 @@ if __name__ == '__main__':
     hp = parser.parse_args()
     
     task = hp.task
-    og_task = hp.task.replace("Bert", "")
+    og_task = hp.task.replace(hp.matcher_type, "")
     with open('task_configs.json', 'r') as file:
         configs = json.load(file)
     

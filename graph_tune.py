@@ -72,6 +72,17 @@ class GraphTune(nn.Module):
     def _forward_transformer(self, input_ids, attention_mask):
         return self.transformer(input_ids=input_ids, attention_mask=attention_mask)
     
+    def _freeze_transformer(self, freeze=True):
+        '''
+        Freeze the transformer weights (for warming up GNN wieghts)
+        '''
+        if freeze:
+            for param in self.transformer.parameters():
+                param.requires_grad = False
+        else:
+            for param in self.transformer.parameters():
+                param.requires_grad = True
+
     def _encode_text(self, samples):
         all_embeddings = []
         

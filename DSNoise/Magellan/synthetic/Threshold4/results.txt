@@ -1,0 +1,24 @@
+task: Dirty/DBLP-ACM
+{'f1': 0.5931537598204265, 'acc': 0.8045031683969259, 'precision': 0.4735663082437276, 'recall': 0.7935435435435435, 'len': 7417, 'ones': 2232, 'non_match': 1450, 'tp': 1057, 'fp': 1175, 'fn': 275}
+task: Dirty/DBLP-GoogleScholar
+{'f1': 0.5946820809248555, 'acc': 0.7964349997096906, 'precision': 0.4725335293036928, 'recall': 0.8019956345494231, 'len': 17223, 'ones': 5443, 'non_match': 3506, 'tp': 2572, 'fp': 2871, 'fn': 635}
+task: Dirty/iTunes-Amazon
+{'f1': 0.6483516483516484, 'acc': 0.8006230529595015, 'precision': 0.5673076923076923, 'recall': 0.7564102564102564, 'len': 321, 'ones': 104, 'non_match': 64, 'tp': 59, 'fp': 45, 'fn': 19}
+task: Dirty/Walmart-Amazon
+{'f1': 0.4210041455550438, 'acc': 0.79541015625, 'precision': 0.2865203761755486, 'recall': 0.7934027777777778, 'len': 6144, 'ones': 1595, 'non_match': 1257, 'tp': 457, 'fp': 1138, 'fn': 119}
+task: Structured/Amazon-Google
+{'f1': 0.4516383734701934, 'acc': 0.7979342449810881, 'precision': 0.311886586695747, 'recall': 0.8183118741058655, 'len': 6874, 'ones': 1834, 'non_match': 1389, 'tp': 572, 'fp': 1262, 'fn': 127}
+task: Structured/Beer
+{'f1': 0.5423728813559322, 'acc': 0.7985074626865671, 'precision': 0.41025641025641024, 'recall': 0.8, 'len': 268, 'ones': 78, 'non_match': 54, 'tp': 32, 'fp': 46, 'fn': 8}
+task: Structured/DBLP-ACM
+{'f1': 0.597489539748954, 'acc': 0.805446946204665, 'precision': 0.47536617842876167, 'recall': 0.8040540540540541, 'len': 7417, 'ones': 2253, 'non_match': 1443, 'tp': 1071, 'fp': 1182, 'fn': 261}
+task: Structured/DBLP-GoogleScholar
+{'f1': 0.597631762247504, 'acc': 0.7987574754688498, 'precision': 0.4760495653782134, 'recall': 0.8026192703461179, 'len': 17223, 'ones': 5407, 'non_match': 3466, 'tp': 2574, 'fp': 2833, 'fn': 633}
+task: Structured/Fodors-Zagats
+{'f1': 0.42323651452282157, 'acc': 0.7548500881834215, 'precision': 0.2914285714285714, 'recall': 0.7727272727272727, 'len': 567, 'ones': 175, 'non_match': 139, 'tp': 51, 'fp': 124, 'fn': 15}
+task: Structured/iTunes-Amazon
+{'f1': 0.5925925925925926, 'acc': 0.7601246105919003, 'precision': 0.5045045045045045, 'recall': 0.717948717948718, 'len': 321, 'ones': 111, 'non_match': 77, 'tp': 56, 'fp': 55, 'fn': 22}
+task: Structured/Walmart-Amazon
+{'f1': 0.4243559718969555, 'acc': 0.7999674479166666, 'precision': 0.2905708787684413, 'recall': 0.7864583333333334, 'len': 6144, 'ones': 1559, 'non_match': 1229, 'tp': 453, 'fp': 1106, 'fn': 123}
+task: Textual/Abt-Buy
+{'f1': 0.4708603145235893, 'acc': 0.8008009751001219, 'precision': 0.3292367399741268, 'recall': 0.8262987012987013, 'len': 5743, 'ones': 1546, 'non_match': 1144, 'tp': 509, 'fp': 1037, 'fn': 107}
