@@ -19,10 +19,21 @@ import sklearn
 
 # TODO: Add sampling based on prior on weak label
 # TODO: Find a way to prevent model to converge to a trivial solution
-
+# encoder initial embeddings seems too tight for GNN to learn anything, everything is embedded around the same point hence GNN cannot warm up correctly.
+# Maybe warmup transformer first?
 
 # Loss seems to converge yet model learns to classify everything as 0 already after the first epoch.
 
+def filter_entity(e, attrs_to_keep):
+    tokens = e.split(' ')
+    filtered = []
+    attr_indices = [i+1 for i, e  in enumerate(tokens) if e=='COL']
+    for i, t in enumerate(tokens):
+        if t in attrs_to_keep:
+            next_attr_index = attr_indices[attr_indices.index(i)+1]
+            val = ' '.join(tokens[i+1: next_attr_index-1])
+            filtered.append(f'COL {t} {val}')
+    return ' '.join(filtered)
 
 class GraphTune(nn.Module):
     """Transformer encoder fine-tuned via GNN classification head"""
@@ -89,12 +100,18 @@ class GraphTune(nn.Module):
             for param in self.transformer.parameters():
                 param.requires_grad = True
 
-    def _encode_text(self, samples):
+    def _encode_text(self, left_samples, right_samples):
         all_embeddings = []
         
-        for i in range(0, len(samples), self.batch_size):
-            batch_samples = samples[i:i+self.batch_size]
-            inputs = self.tokenizer(batch_samples, return_tensors="pt", padding=True, truncation=True)
+        for i in range(0, len(left_samples), self.batch_size):
+            batch_samples_left = left_samples[i:i+self.batch_size].tolist()
+            batch_samples_right = right_samples[i:i+self.batch_size].tolist()
+            process_left, process_right = [], []
+            for left, right in zip(batch_samples_left, batch_samples_right):
+                process_left.append(filter_entity(left, {'title'}))
+                process_right.append(filter_entity(right, {'title'}))
+
+            inputs = self.tokenizer(text=process_left, text_pair=process_right, padding=True, truncation=True, return_tensors='pt')
             inputs = {key: val.to(self.device) for key, val in inputs.items()}
             
             # Use inference mode for transformer if not training
@@ -115,13 +132,12 @@ class GraphTune(nn.Module):
             # Clear memory more aggressively
             del inputs, outputs
             torch.cuda.empty_cache()
-        
         return torch.cat(all_embeddings, dim=0)
 
     
-    def forward(self, samples, edge_index):
+    def forward(self, lefts, rights, edge_index):
         
-        x = self._encode_text(samples).to(device=self.device)
+        x = self._encode_text(lefts, rights).to(device=self.device)
         
         for conv_layer in self.conv_layers:
             x = conv_layer(x, edge_index)
@@ -130,7 +146,7 @@ class GraphTune(nn.Module):
         return x
         
     
-def evaluate(model, edge_index, samples, mask, labels_clean, hp, device='cuda:1'):
+def evaluate(model, edge_index, lefts, rights, mask, labels_clean, hp, device='cuda:1'):
     '''
     Evaluate the model on the given data mask
     No neighbor sampling
@@ -138,7 +154,7 @@ def evaluate(model, edge_index, samples, mask, labels_clean, hp, device='cuda:1'
     model.eval()
     model.training_mode = False # Manual flag for transformer inference mode
     with torch.no_grad():
-        out = model(samples, edge_index)
+        out = model(lefts, rights, edge_index)
         logits = out[mask]
         labels = labels_clean[mask]
         preds = torch.argmax(logits, dim=1)
@@ -158,6 +174,8 @@ def train(model, data_obj, hp, device='cuda:1'):
     optimizer = model.get_optimizer(hp.transformer_lr, hp.gnn_lr)
     criterion = nn.CrossEntropyLoss()
     samples = data_obj.samples # Strings hence no need to move to device
+    lefts = data_obj.left
+    rights = data_obj.right
 
     # Move the rest of the data to the device
     edge_index = data_obj.edge_index.to(device)
@@ -184,7 +202,7 @@ def train(model, data_obj, hp, device='cuda:1'):
         model.train()
         model.training_mode = True # Manual flag for transformer inference mode
         optimizer.zero_grad()
-        out = model(data_obj.samples, edge_index)
+        out = model(lefts, rights, edge_index)
 
         # Sample nodes with label 0 to be used as negative samples out of the train mask
         negative_sample_mask = negative_sampling(train_mask, negative_label_mask, sample_ratio=hp.sample_ratio)
@@ -194,9 +212,9 @@ def train(model, data_obj, hp, device='cuda:1'):
         loss = criterion(out[train_iter_mask], y[train_iter_mask])
         loss.backward()
         optimizer.step()
-        noisy_acc, noisy_f1 = evaluate(model, edge_index, samples, train_mask, y, hp, device)
-        train_acc, train_f1 = evaluate(model, edge_index, samples, train_mask, labels_clean, hp, device)
-        acc, f1 = evaluate(model, edge_index, samples, val_mask, labels_clean, hp, device)
+        noisy_acc, noisy_f1 = evaluate(model, edge_index, lefts, rights, train_mask, y, hp, device)
+        train_acc, train_f1 = evaluate(model, edge_index, lefts, rights, train_mask, labels_clean, hp, device)
+        acc, f1 = evaluate(model, edge_index, lefts, rights, val_mask, labels_clean, hp, device)
         print(f'Epoch {epoch} Loss: {loss.item():.4f} Accuracy: {acc:.4f} F1: {f1:.4f} Train Accuracy: {train_acc:.4f} Train F1: {train_f1:.4f} Noisy Accuracy: {noisy_acc:.4f} Noisy F1: {noisy_f1:.4f}')
 
 def transform(data):
