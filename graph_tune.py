@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
 import sklearn.metrics as metrics
 import numpy as np
 import random
@@ -35,6 +36,23 @@ def filter_entity(e, attrs_to_keep):
             filtered.append(f'COL {t} {val}')
     return ' '.join(filtered)
 
+
+class PreFTDataset(Dataset):
+
+    """Basic dataset class for pre-fine-tuning transformer phase"""
+
+    def __init__(self, lefts, rights, labels):
+        self.lefts = lefts
+        self.rights = rights
+        self.labels = labels
+    
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, index):
+        return self.lefts[index], self.rights[index], self.labels[index]
+
+
 class GraphTune(nn.Module):
     """Transformer encoder fine-tuned via GNN classification head"""
 
@@ -46,7 +64,7 @@ class GraphTune(nn.Module):
         self.transformer = AutoModel.from_pretrained(lm)
         self.tokenizer = AutoTokenizer.from_pretrained(lm)
         self.conv_type = conv_type
-        self.hc_config = [encoder_channel]+hidden_channels
+        self.hc_config = [encoder_channel] + hidden_channels
         self.seed = seed
         self.conv_layers = nn.ModuleList()
         self.batch_size = encoding_batch_size
@@ -64,6 +82,7 @@ class GraphTune(nn.Module):
                 raise ValueError(f"Unsupported graph convolution type: {conv_type}")
 
         self.classifier = nn.Linear(hidden_channels[-1], 2)
+        self.pre_fine_tune_classifier = nn.Linear(encoder_channel, 2)
 
     def signature(self):
         return f'{self.lm}_{self.conv_type}'
@@ -71,6 +90,7 @@ class GraphTune(nn.Module):
     def get_optimizer(self, transformer_lr=1e-5, gnn_lr=1e-3):
         # Separate parameters for transformer and GNN
         transformer_params = self.transformer.parameters()
+        transformer_params += list(self.pre_fine_tune_classifier.parameters())
         gnn_params = []
         
         # Collect GNN and classifier parameters
@@ -135,14 +155,32 @@ class GraphTune(nn.Module):
         return torch.cat(all_embeddings, dim=0)
 
     
-    def forward(self, lefts, rights, edge_index):
-        
-        x = self._encode_text(lefts, rights).to(device=self.device)
-        
-        for conv_layer in self.conv_layers:
-            x = conv_layer(x, edge_index)
-            x = F.relu(x)
-        x = self.classifier(x)
+    def forward(self, lefts, rights, edge_index, pre_fine_tune=False):
+
+        if pre_fine_tune:
+            process_lefts = []
+            process_rights = []
+            for l, r in zip(lefts, rights):
+                process_lefts.append(filter_entity(l, {'title'}))
+                process_rights.append(filter_entity(r, {'title'}))
+            inputs = self.tokenizer(text=process_lefts, text_pair=process_rights, padding=True, truncation=True, return_tensors='pt')
+            inputs = {key: val.to(self.device) for key, val in inputs.items()}
+            outputs = checkpoint(
+                    self._forward_transformer,
+                    inputs['input_ids'],
+                    inputs['attention_mask'],
+                    use_reentrant=False
+                )
+            embeddings = outputs.last_hidden_state[:, 0, :]
+            x = self.pre_fine_tune_classifier(embeddings)
+
+        else:
+            x = self._encode_text(lefts, rights).to(device=self.device)
+            
+            for conv_layer in self.conv_layers:
+                x = conv_layer(x, edge_index)
+                x = F.relu(x)
+            x = self.classifier(x)
         return x
         
     
@@ -168,6 +206,7 @@ def train(model, data_obj, hp, device='cuda:1'):
     Basic training loop for the model
     No neighbor sampling, evaluate on validation set after each epoch
     '''
+
     model.to(device)
     model.train()
     model.training_mode = True # Manual flag for transformer inference mode
@@ -189,16 +228,34 @@ def train(model, data_obj, hp, device='cuda:1'):
     negative_label_mask[y == 0] = True # Negative label mask
     labels_clean=data_obj.labels_clean.to(device)
 
+    # --------------pre fine tuning-------------
+    ns_mask_pft = negative_sampling(train_mask, negative_label_mask, sample_ratio=hp.sample_ratio)
+    ps_mask_pft = (positive_label_mask & train_mask)
+    pft_mask = (negative_sample_mask | positive_sample_mask)
+    pft_left = torch.tensor(lefts)[pft_mask]
+    pft_right = torch.tensor(rights)[pft_mask]
+    pft_labels = y[pft_mask]
+
+    pft_dataset = PreFTDataset(lefts=pft_left, rights=pft_right, labels=pft_labels)
+    pft_dataloader = DataLoader(pft_dataset, batch_size=16, shuffle=True)
 
     print(f'amount of positive samples in trainset: [{(positive_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
     print(f'amount of negative samples in trainset: [{(negative_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
+    for epcoh in range(1, hp.pft_epochs+1):
+        for l, r, y in pft_dataloader:
+            out = model(l, r, edge_index, pre_fine_tune=True)
+            loss = criterion(out, y)
+            loss.backward()
+            optimizer.step()
 
     for epoch in range(1, hp.n_epochs+1):
-        # if epoch <= hp.freeze_epoch_ratio * hp.n_epochs:
-        #     model._freeze_transformer(freeze=True)
-        # else:
-        #     model._freeze_transformer(freeze=False)
-        model._freeze_transformer(freeze=True) # Test GNN overfitting, temporary
+        if epoch <= hp.freeze_epoch_ratio * hp.n_epochs:
+            model._freeze_transformer(freeze=True)
+            print('transformer freezed')
+        else:
+            model._freeze_transformer(freeze=False)
+            print('transformer active')
+        # model._freeze_transformer(freeze=True) # Test GNN overfitting, temporary
         model.train()
         model.training_mode = True # Manual flag for transformer inference mode
         optimizer.zero_grad()
