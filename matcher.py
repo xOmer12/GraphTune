@@ -44,11 +44,11 @@ def get_raw_data(path):
 
 
 # the function gets the raw data and writes it to the given file inserting tabs between them.
-def write_dataset(path, left, right, labels):
+def write_dataset(path, left, right, labels, logits):
     with open(path, "w") as file:
         for i in range(len(labels)):
             # insert tabs
-            entry = left[i] + "\t" + right[i] + "\t" + str(labels[i])
+            entry = left[i] + "\t" + right[i] + "\t" + str(labels[i]) + "\t" + str(logits[i])
             file.write(entry)
             # go to the next line
             file.write("\n")
@@ -135,22 +135,23 @@ def label_by_bert(left_data, right_data, threshold=0.5):
         cosine_dist.append(cosine(left, right))
 
     bert_label = list()
-
+    bert_logits = list()
     for dist in cosine_dist:
+        bert_logits.append(dist)
         if dist > threshold:
             bert_label.append(1)
         else:
             bert_label.append(0)
 
-    return bert_label
+    return bert_label, bert_logits
 
 
 # the function gets the path to the file and returns the bert labels
 def label_dataset_by_bert(dataset_path, output_path, threshold):
     left_clean, right_clean, real = getData(dataset_path)
-    labels = label_by_bert(left_clean, right_clean, threshold)
+    labels, logits = label_by_bert(left_clean, right_clean, threshold)
     left_col, right_col, real_labels = get_raw_data(dataset_path)
-    write_dataset(output_path, left_col, right_col, labels)
+    write_dataset(output_path, left_col, right_col, labels, logits)
 
     ds = dataset_path.split("/")[-3] + "/" + dataset_path.split("/")[-2]
     result_dir = "DSNoise/Magellan/Bert/Threshold" + str(4)
@@ -363,5 +364,5 @@ def label_all_dataSets(labeler_name, labeler, synthetic=False):
     return
 
 if __name__ == '__main__':
-    # label_all_dataSets("Bert", label_dataset_by_bert)
+    label_all_dataSets("Bert", label_dataset_by_bert)
     label_all_dataSets("synthetic", label_dataset_by_sythetic, synthetic=True)

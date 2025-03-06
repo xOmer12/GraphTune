@@ -41,16 +41,19 @@ class PreFTDataset(Dataset):
 
     """Basic dataset class for pre-fine-tuning transformer phase"""
 
-    def __init__(self, lefts, rights, labels):
+    def __init__(self, lefts, rights, labels, lm='roberta-base'):
         self.lefts = lefts
         self.rights = rights
         self.labels = labels
+        self.tokenizer = AutoTokenizer.from_pretrained(lm)
     
     def __len__(self):
         return len(self.labels)
     
     def __getitem__(self, index):
-        return self.lefts[index], self.rights[index], self.labels[index]
+        tokenized_pair = self.tokenizer.encode(self.lefts[index], self.rights[index], truncation=True, padding=True, max_length=512)
+        return tokenized_pair, self.labels[index]
+
 
 
 class GraphTune(nn.Module):
@@ -89,7 +92,7 @@ class GraphTune(nn.Module):
     
     def get_optimizer(self, transformer_lr=1e-5, gnn_lr=1e-3):
         # Separate parameters for transformer and GNN
-        transformer_params = self.transformer.parameters()
+        transformer_params = list(self.transformer.parameters())
         transformer_params += list(self.pre_fine_tune_classifier.parameters())
         gnn_params = []
         
@@ -120,59 +123,60 @@ class GraphTune(nn.Module):
             for param in self.transformer.parameters():
                 param.requires_grad = True
 
-    def _encode_text(self, left_samples, right_samples):
-        all_embeddings = []
+    # def _encode_text(self, left_samples, right_samples):
+    #     all_embeddings = []
         
-        for i in range(0, len(left_samples), self.batch_size):
-            batch_samples_left = left_samples[i:i+self.batch_size].tolist()
-            batch_samples_right = right_samples[i:i+self.batch_size].tolist()
-            process_left, process_right = [], []
-            for left, right in zip(batch_samples_left, batch_samples_right):
-                process_left.append(filter_entity(left, {'title'}))
-                process_right.append(filter_entity(right, {'title'}))
+    #     for i in range(0, len(left_samples), self.batch_size):
+    #         batch_samples_left = left_samples[i:i+self.batch_size].tolist()
+    #         batch_samples_right = right_samples[i:i+self.batch_size].tolist()
+    #         inputs = self.tokenizer(text=batch_samples_left, text_pair=batch_samples_right, padding=True, truncation=True, return_tensors='pt')
+    #         inputs = {key: val.to(self.device) for key, val in inputs.items()}
+            
+    #         # Use inference mode for transformer if not training
+    #         if not self.training:
+    #             with torch.inference_mode():
+    #                 outputs = self._forward_transformer(inputs['input_ids'], inputs['attention_mask'])
+    #         else:
+    #             outputs = checkpoint(
+    #                 self._forward_transformer,
+    #                 inputs['input_ids'],
+    #                 inputs['attention_mask'],
+    #                 use_reentrant=False
+    #             )
+            
+    #         embeddings = outputs.last_hidden_state[:, 0, :]
+    #         all_embeddings.append(embeddings) 
+            
+    #         # Clear memory more aggressively
+    #         del inputs, outputs
+    #         torch.cuda.empty_cache()
+    #     return torch.cat(all_embeddings, dim=0)
 
-            inputs = self.tokenizer(text=process_left, text_pair=process_right, padding=True, truncation=True, return_tensors='pt')
-            inputs = {key: val.to(self.device) for key, val in inputs.items()}
-            
-            # Use inference mode for transformer if not training
-            if not self.training:
-                with torch.inference_mode():
-                    outputs = self._forward_transformer(inputs['input_ids'], inputs['attention_mask'])
-            else:
-                outputs = checkpoint(
-                    self._forward_transformer,
-                    inputs['input_ids'],
-                    inputs['attention_mask'],
-                    use_reentrant=False
-                )
-            
-            embeddings = outputs.last_hidden_state[:, 0, :]
-            all_embeddings.append(embeddings) 
-            
-            # Clear memory more aggressively
-            del inputs, outputs
-            torch.cuda.empty_cache()
-        return torch.cat(all_embeddings, dim=0)
+    def _tokenize_text(self, left_samples, right_samples):
+        tokenized_samples = []
+        for left, right in zip(left_samples, right_samples):
+            x = self.tokenizer.encode(text=left, text_pair=right, max_length=512, truncation=True)
+            tokenized_samples.append(x)
+        return tokenized_samples
+    
+    def _encode_text(self, left_samples, right_samples):
+        encodings = []
+        for left, right in zip(left_samples, right_samples):
+            x = self.tokenizer.encode(text=left, text_pair=right, max_length=512, truncation=True)
+            enc = self.transformer(x)[0][:, 0, :]
+            encodings.append(enc)
+        encoded_text = torch.stack(encodings)
+        return encoded_text
 
     
-    def forward(self, lefts, rights, edge_index, pre_fine_tune=False):
+    def forward(self, x, lefts, rights, edge_index, pre_fine_tune=False, debug_mode=False):
 
         if pre_fine_tune:
-            process_lefts = []
-            process_rights = []
-            for l, r in zip(lefts, rights):
-                process_lefts.append(filter_entity(l, {'title'}))
-                process_rights.append(filter_entity(r, {'title'}))
-            inputs = self.tokenizer(text=process_lefts, text_pair=process_rights, padding=True, truncation=True, return_tensors='pt')
-            inputs = {key: val.to(self.device) for key, val in inputs.items()}
-            outputs = checkpoint(
-                    self._forward_transformer,
-                    inputs['input_ids'],
-                    inputs['attention_mask'],
-                    use_reentrant=False
-                )
-            embeddings = outputs.last_hidden_state[:, 0, :]
-            x = self.pre_fine_tune_classifier(embeddings)
+            emb = self.transformer(x)[0][:, 0, :]
+            out = self.pre_fine_tune_classifier(emb)
+            if debug_mode:
+                return emb
+            return out
 
         else:
             x = self._encode_text(lefts, rights).to(device=self.device)
@@ -180,6 +184,8 @@ class GraphTune(nn.Module):
             for conv_layer in self.conv_layers:
                 x = conv_layer(x, edge_index)
                 x = F.relu(x)
+            if debug_mode:
+                return x
             x = self.classifier(x)
         return x
         
@@ -193,8 +199,8 @@ def evaluate(model, edge_index, lefts, rights, mask, labels_clean, hp, device='c
     model.training_mode = False # Manual flag for transformer inference mode
     with torch.no_grad():
         out = model(lefts, rights, edge_index)
-        logits = out[mask]
-        labels = labels_clean[mask]
+        logits = out[mask==1]
+        labels = labels_clean[mask==1]
         preds = torch.argmax(logits, dim=1)
         accuracy = accuracy_score(labels.cpu(), preds.cpu())
         f1 = f1_score(labels.cpu(), preds.cpu())
@@ -222,31 +228,57 @@ def train(model, data_obj, hp, device='cuda:1'):
     val_mask = data_obj.val_mask.to(device)
     test_mask = data_obj.test_mask.to(device)
     y = data_obj.y.to(device)
-    positive_label_mask = torch.zeros_like(y)
-    positive_label_mask[y == 1] = True # Positive label mask
     negative_label_mask = torch.zeros_like(y)
-    negative_label_mask[y == 0] = True # Negative label mask
+    positive_sample_mask = torch.zeros_like(y)
+    for i, label in enumerate(y):
+        if train_mask[i]:
+            if label:
+                positive_sample_mask[i] = 1
+            else:
+                negative_label_mask[i] = 1
     labels_clean=data_obj.labels_clean.to(device)
 
     # --------------pre fine tuning-------------
-    ns_mask_pft = negative_sampling(train_mask, negative_label_mask, sample_ratio=hp.sample_ratio)
-    ps_mask_pft = (positive_label_mask & train_mask)
-    pft_mask = (negative_sample_mask | positive_sample_mask)
-    pft_left = torch.tensor(lefts)[pft_mask]
-    pft_right = torch.tensor(rights)[pft_mask]
-    pft_labels = y[pft_mask]
-
+    # pft_mask = data_obj.pft_mask.to(device)
+    pft_mask = data_obj.train_mask.to(device)
+    pft_left, pft_right, pft_labels = [], [], []
+    for i, (l, r, y_pft) in enumerate(zip(lefts, rights, y)):
+        if pft_mask[i]:
+            pft_left.append(l)
+            pft_right.append(r)
+            pft_labels.append(y_pft)
+    print(len(pft_left))
+    pft_labels = torch.tensor(pft_labels).to(device)  
     pft_dataset = PreFTDataset(lefts=pft_left, rights=pft_right, labels=pft_labels)
+    pft_full_dataset = PreFTDataset(lefts=lefts, rights=rights, labels=labels_clean)
     pft_dataloader = DataLoader(pft_dataset, batch_size=16, shuffle=True)
+    pft_full_dataloader = DataLoader(pft_full_dataset, batch_size=16, shuffle=False)
 
-    print(f'amount of positive samples in trainset: [{(positive_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
-    print(f'amount of negative samples in trainset: [{(negative_label_mask & train_mask).sum().item()}/{train_mask.sum().item()}]')
     for epcoh in range(1, hp.pft_epochs+1):
-        for l, r, y in pft_dataloader:
-            out = model(l, r, edge_index, pre_fine_tune=True)
-            loss = criterion(out, y)
+        model.train()
+        model.training_mode = True
+        for l, r, y_pft in tqdm(pft_dataloader):
+            optimizer.zero_grad()
+            out = model(list(l), list(r), edge_index, pre_fine_tune=True)
+            loss = criterion(out, y_pft)
             loss.backward()
             optimizer.step()
+        match_s = []
+        unmatch_s = []
+        for l, r, y_pft in pft_full_dataloader:
+            emb = model(l, r, edge_index, pre_fine_tune=True, debug_mode=True)
+            # out = model(l, r, edge_index, pre_fine_tune=True, debug_mode=False)
+            # pred = torch.argmax(out, dim=1)
+            # print(f'acc: {accuracy_score(pred.cpu(), y_pft.cpu())}')
+            # print(f'f1: {f1_score(pred.cpu(), y_pft.cpu())}')
+            for i, label in enumerate(y_pft):
+                if label:   
+                    match_s.append(emb[i])
+                else:
+                    unmatch_s.append(emb[i])
+        match_centroid = torch.mean(torch.stack(match_s), dim=0)
+        unmatch_centroid = torch.mean(torch.stack(unmatch_s), dim=0)
+        print(f'gap: {torch.norm(match_centroid-unmatch_centroid)}')
 
     for epoch in range(1, hp.n_epochs+1):
         if epoch <= hp.freeze_epoch_ratio * hp.n_epochs:
@@ -260,15 +292,28 @@ def train(model, data_obj, hp, device='cuda:1'):
         model.training_mode = True # Manual flag for transformer inference mode
         optimizer.zero_grad()
         out = model(lefts, rights, edge_index)
+        emb = model(lefts, rights, edge_index, debug_mode=True)
 
         # Sample nodes with label 0 to be used as negative samples out of the train mask
         negative_sample_mask = negative_sampling(train_mask, negative_label_mask, sample_ratio=hp.sample_ratio)
-        positive_sample_mask = (positive_label_mask & train_mask)
-        train_iter_mask = (negative_sample_mask | positive_sample_mask)
+        train_iter_mask = torch.zeros_like(y)
+        for i, label in enumerate(y):
+            if negative_sample_mask[i] or positive_sample_mask[i]:
+                train_iter_mask[i] = 1
+
         print(f'Epoch {epoch} Training on [{train_iter_mask.sum().item()}/{train_mask.sum().item()}] samples')
-        loss = criterion(out[train_iter_mask], y[train_iter_mask])
+        loss = criterion(out[train_iter_mask==1], y[train_iter_mask==1])
         loss.backward()
         optimizer.step()
+        match_s, unmatch_s = [], []
+        for i, label in enumerate(labels_clean[train_iter_mask==1]):
+            if label:
+                match_s.append(emb[i])
+            else:
+                unmatch_s.append(emb[i])
+        match_centroid = torch.mean(torch.stack(match_s), dim=0)
+        unmatch_centroid = torch.mean(torch.stack(unmatch_s), dim=0)
+        print(f'gap: {torch.norm(match_centroid-unmatch_centroid)}')
         noisy_acc, noisy_f1 = evaluate(model, edge_index, lefts, rights, train_mask, y, hp, device)
         train_acc, train_f1 = evaluate(model, edge_index, lefts, rights, train_mask, labels_clean, hp, device)
         acc, f1 = evaluate(model, edge_index, lefts, rights, val_mask, labels_clean, hp, device)

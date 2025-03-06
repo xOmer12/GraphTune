@@ -28,8 +28,8 @@ if __name__ == '__main__':
     parser.add_argument("--transformer_lr", type=float, default=1e-3)
     parser.add_argument("--gnn_lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
-    parser.add_argument("--n_epochs", type=int, default=1)
-    parser.add_argument("--pft_epochs", type=int, default=2)
+    parser.add_argument("--n_epochs", type=int, default=5)
+    parser.add_argument("--pft_epochs", type=int, default=10)
     parser.add_argument("--freeze_epoch_ratio", type=float, default=0.5)
     parser.add_argument("--sizes", type=list, default=[50, 10])
     parser.add_argument("--sampling_size", type=int, default=512)
@@ -60,7 +60,7 @@ if __name__ == '__main__':
     real_config = configs[og_task]
 
     sbm = AdaptiveBMGraph(p=hp.proximity, q=hp.diversity, 
-    config_true=noisy_config, config_noisy=real_config, c0=50, c1=50,beta=25)
+    config_true=real_config, config_noisy=noisy_config, c0=50, c1=50,beta=25)
     sbm.calc_community_probs()
     print('Community probabilities:')
     print(sbm.probs)
@@ -68,7 +68,8 @@ if __name__ == '__main__':
     graph = sbm.generate_graph()
     print('Analyzing graph...')
     sbm.analyze_graph()
-    print('-'*50)
+    # sbm.plot_graph()
+    # print('-'*50)
     model = GraphTune(lm = hp.lm,
                       conv_type=hp.conv_type,
                       encoder_channel=hp.input_layer,
