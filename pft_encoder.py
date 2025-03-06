@@ -90,7 +90,18 @@ def pre_fine_tune(model, train_loader, optimizer, criterion, device, epochs):
             optimizer.step()
             total_loss += loss.item()
         print(f"Epoch [{epoch}/{epochs}], Loss: {total_loss/len(train_loader)}")
-    
+
+
+def inference(model, loader):
+    x = []
+    with torch.no_grad():
+        model.eval()
+        for left_samples, right_samples, labels in loader:
+            _, enc = model(left_samples, right_samples, inference=True)
+            x.append(enc)
+    return torch.cat(x, dim=0)
+
+        
 def evaluate_space(model, train_loader, device):
     with torch.no_grad():
         model.eval()
