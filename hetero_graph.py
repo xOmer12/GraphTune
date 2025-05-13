@@ -82,23 +82,34 @@ def extract_agreement_pairs(left, right, model):
         attr_agreement[i] = mutual_agreement
     return attr_agreement
 
-def build_mutual_agreement_graph(attr_agreement, threshold=0.75, sample_edge=False, sampling_prob=0.5):
+def build_mutual_agreement_graph(attr_agreement, threshold=0.75, sample_edge=False, sampling_prob=0.5, null_sampling_prob=0.05):
     data = HeteroData()
     nodes = set(attr_agreement.keys())
     # Add nodes to the graph
     data['node'].num_nodes = len(nodes)
     edges = {attr: [] for attr in next(iter(attr_agreement.values())).keys()}
+    edges['null'] = []  # For no attribute agreement
     for node1, node2 in combinations(attr_agreement.keys(), 2):
+        no_agreement_left = True
+        no_agreement_right = True
         for attr in attr_agreement[node1].keys():
             # Check if both nodes have high agreement for this attribute
             if not sample_edge:
-                if attr_agreement[node1][attr] >= threshold and attr_agreement[node2][attr] >= threshold:
-                    edges[attr].append((node1, node2))
-            else: # Sample edges based on agreement
-                if attr_agreement[node1][attr] >= threshold and attr_agreement[node2][attr] >= threshold:
-                    if np.random.rand() < sampling_prob:
+                if attr_agreement[node1][attr] >= threshold:
+                    no_agreement_left = False
+                    if attr_agreement[node2][attr] >= threshold:
+                        no_agreement_right = False
                         edges[attr].append((node1, node2))
-    
+            else: # Sample edges based on agreement
+                if attr_agreement[node1][attr] >= threshold:
+                    no_agreement_left = False
+                    if attr_agreement[node2][attr] >= threshold:
+                        no_agreement_right = False
+                        if np.random.rand() < sampling_prob:
+                            edges[attr].append((node1, node2))
+        if no_agreement_left and no_agreement_right:
+            if np.random.rand() < null_sampling_prob:
+                edges['null'].append((node1, node2))
     # Convert to PyTorch tensors and store in HeteroData
     for attr, edge_list in edges.items():
         if edge_list:  # Ensure there are edges of this type

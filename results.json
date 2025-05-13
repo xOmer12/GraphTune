@@ -1,0 +1,1 @@
+{"task": "Structured/iTunes-Amazon", "seed": 42, "edge_sampling_prob": 0.005, "null_sampling_prob": 0.001, "agreement_threshold": 0.4, "encoding_model": "roberta-base", "encoding_lr": 1e-05, "encoding_epochs": 10, "gnn_model": "SAGE", "gnn_agg_type": "sum", "gnn_epochs": 5, "accuracy": 0.8807339449541285, "f1": 0.7547169811320755}
