@@ -40,12 +40,16 @@ def get_data(dset_path, has_labels=True):
         return leftCol, rightCol
 
 def write_results_to_file(file_path, res_dict):
-    with open(file_path, 'w') as file:
-        file.write(json.dumps(res_dict) + '\n')
 
+    with open(file_path, 'r') as file:
+        data = json.load(file)
+    data.append(res_dict)
+    with open(file_path, 'w') as file:
+        json.dump(data, file, indent=4)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument("--experiment_name", type=str, default="hetero_graph")
     parser.add_argument("--task", type=str, default="Structured/iTunes-AmazonBert")
     parser.add_argument("--matcher_type", type=str, default="Bert")
 
@@ -53,7 +57,7 @@ if __name__ == '__main__':
     parser.add_argument("--sim_lm", type=str, default="all-MiniLM-L6-v2")
     parser.add_argument("--p", type=float, default=0.005)
     parser.add_argument("--q", type=float, default=0.001)
-    parser.add_argument("--agreement_threshold", type=float, default=0.4)
+    parser.add_argument("--agreement_threshold", type=float, default=0.85)
 
     # Encoding model parameters
     parser.add_argument("--encoding_lm", type=str, default="roberta-base")
@@ -67,10 +71,10 @@ if __name__ == '__main__':
     parser.add_argument("--agg_type", type=str, default="sum")
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--input_layer", type=int, default=768)
-    parser.add_argument("--hidden_layers", type=list, default=[32, 16])
+    parser.add_argument("--hidden_layers", type=list, default=[256, 64])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gnn_lr", type=float, default=3e-4)
-    parser.add_argument("--n_epochs", type=int, default=5)
+    parser.add_argument("--n_epochs", type=int, default=10)
 
 
    
@@ -152,6 +156,7 @@ if __name__ == '__main__':
     evaluated_labels, accuracy, f1 = evaluate_model(rgnn_model, mutual_agreement_graph, test_mask_tensor, true_labels_tensor)
 
     res_dict = {
+        'experiment_name': hp.experiment_name,
         'task': og_task,
         'seed': hp.seed,
         'edge_sampling_prob': hp.p,
